@@ -1,0 +1,23 @@
+# Local runtime configuration
+VoiceTyper.config.json
+
+# Local Whisper models and downloaded/build artifacts
+models/
+vendor/
+
+# Runtime output
+logs/
+recordings/
+*.log
+*.wav
+
+# PowerShell/editor noise
+*.tmp
+*.bak
+*.ps1xml
+.vscode/
+.idea/
+
+# OS noise
+Thumbs.db
+Desktop.ini
