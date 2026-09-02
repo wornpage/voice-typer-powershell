@@ -273,8 +273,32 @@ New-Item -ItemType Directory -Force -Path $script:RecordingsRoot | Out-Null
 
 function Write-Log {
     param([string]$Message)
+    if ((Test-Path -LiteralPath $script:AppLogPath -PathType Leaf) -and
+        (Get-Item -LiteralPath $script:AppLogPath).Length -gt 1MB) {
+        Clear-Content -LiteralPath $script:AppLogPath
+    }
     $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"), $Message
     Add-Content -LiteralPath $script:AppLogPath -Value $line -Encoding UTF8
+}
+
+function Remove-PrivateArtifacts {
+    $preserve = [bool](Get-ConfigValue -Config $script:Config -Name "PreserveDebugArtifacts" -Default $false)
+    if ($preserve) {
+        return
+    }
+
+    foreach ($path in @(
+        $script:CurrentRecordingPath,
+        $script:TranscribeOutputPath,
+        $script:TranscribeErrorPath
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $script:CurrentRecordingPath = ""
+    $script:TranscribeOutputPath = ""
+    $script:TranscribeErrorPath = ""
 }
 
 Write-Log "VoiceTyper starting"
@@ -292,8 +316,8 @@ Write-Log "VoiceTyper starting"
 
 function New-DefaultConfig {
     [ordered]@{
-        WhisperStreamPath = ".\vendor\whisper.cpp\build\bin\Release\whisper-stream.exe"
-        WhisperCliPath = ".\vendor\whisper.cpp-build\bin\Release\whisper-cli.exe"
+        WhisperStreamPath = ".\vendor\whisper-b4938\Release\whisper-stream.exe"
+        WhisperCliPath = ".\vendor\whisper-b4938\Release\whisper-cli.exe"
         ModelPath = ".\models\ggml-base.en.bin"
         Language = "en"
         Threads = 8
@@ -318,6 +342,7 @@ function New-DefaultConfig {
         EnableFeedbackSounds = $true
         RecordStartSound = "Asterisk"
         RecordStopSound = "Exclamation"
+        PreserveDebugArtifacts = $false
     }
 }
 
@@ -487,32 +512,11 @@ function Resolve-TypingTarget {
     return (Test-UsableTargetWindow $script:TargetHandle)
 }
 
-function Find-CommandPath {
-    param([string]$CommandName)
-    $command = Get-Command $CommandName -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $command) {
-        return ""
-    }
-    return $command.Source
-}
-
 function Find-WhisperStreamPath {
     $configured = Resolve-AppPath $script:Config.WhisperStreamPath
     if (Test-Path -LiteralPath $configured -PathType Leaf) {
         return $configured
     }
-
-    $fromPath = Find-CommandPath "whisper-stream.exe"
-    if (-not [string]::IsNullOrWhiteSpace($fromPath) -and (Test-Path -LiteralPath $fromPath -PathType Leaf)) {
-        return $fromPath
-    }
-
-    $localMatch = Get-ChildItem -LiteralPath $script:AppRoot -Recurse -File -Filter "whisper-stream.exe" -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($null -ne $localMatch) {
-        return $localMatch.FullName
-    }
-
     return ""
 }
 
@@ -521,18 +525,6 @@ function Find-WhisperCliPath {
     if (Test-Path -LiteralPath $configured -PathType Leaf) {
         return $configured
     }
-
-    $fromPath = Find-CommandPath "whisper-cli.exe"
-    if (-not [string]::IsNullOrWhiteSpace($fromPath) -and (Test-Path -LiteralPath $fromPath -PathType Leaf)) {
-        return $fromPath
-    }
-
-    $localMatch = Get-ChildItem -LiteralPath $script:AppRoot -Recurse -File -Filter "whisper-cli.exe" -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($null -ne $localMatch) {
-        return $localMatch.FullName
-    }
-
     return ""
 }
 
@@ -541,17 +533,6 @@ function Find-WhisperModelPath {
     if (Test-Path -LiteralPath $configured -PathType Leaf) {
         return $configured
     }
-
-    $modelRoot = Join-Path $script:AppRoot "models"
-    if (Test-Path -LiteralPath $modelRoot -PathType Container) {
-        $modelMatch = Get-ChildItem -LiteralPath $modelRoot -Recurse -File -Filter "*.bin" -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match "^ggml-.*\.bin$" } |
-            Select-Object -First 1
-        if ($null -ne $modelMatch) {
-            return $modelMatch.FullName
-        }
-    }
-
     return ""
 }
 
@@ -730,7 +711,7 @@ function Start-Transcription {
     New-Item -ItemType File -Force -Path $script:TranscribeOutputPath, $script:TranscribeErrorPath | Out-Null
 
     $arguments = Build-WhisperCliArguments -AudioPath $AudioPath
-    Write-Log "Starting transcription: $cliPath $arguments"
+    Write-Log "Starting transcription with configured local backend."
 
     $script:IsTranscribing = $true
     $startButton.Enabled = $false
@@ -749,6 +730,7 @@ function Start-Transcription {
         $startButton.Enabled = $true
         $stopButton.Enabled = $false
         Write-Log "Start-Transcription failed: $($_.Exception.Message)"
+        Remove-PrivateArtifacts
         [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "Voice Typer") | Out-Null
     }
 }
@@ -779,11 +761,12 @@ function Complete-TranscriptionIfReady {
             Send-TextToTarget $text
         }
         $statusLabel.Text = "Typed"
-        Write-Log "Transcription text: $text"
+        Write-Log "Transcription completed. Characters=$($text.Length)"
     }
 
     $startButton.Enabled = $true
     $stopButton.Enabled = $false
+    Remove-PrivateArtifacts
 }
 
 function Get-FinalTranscriptText {
@@ -839,9 +822,8 @@ function Offer-BackendSetup {
     )
 
     if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
-        Start-Process powershell.exe -ArgumentList @(
+        Start-Process pwsh.exe -ArgumentList @(
             "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
             "-File", (Quote-Arg $setupPath)
         )
     }
@@ -914,7 +896,7 @@ function Send-TextToTarget {
         }
 
         if (-not (Resolve-TypingTarget)) {
-            Write-Log "No usable typing target for text: $Text"
+            Write-Log "No usable typing target. Characters=$($Text.Length)"
             return
         }
 
@@ -935,7 +917,7 @@ function Send-TextToTarget {
             [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $Text))
         }
         $script:LastTypedAt = Get-Date
-        Write-Log "$outputMethod into '$script:TargetTitle': $Text"
+        Write-Log "$outputMethod into '$script:TargetTitle'. Characters=$($Text.Length)"
     }
     catch {
         Write-Log "Send-TextToTarget failed: $($_.Exception.Message)"
@@ -1179,7 +1161,7 @@ function Process-WhisperDiagnosticLine {
         return
     }
 
-    Write-Log "whisper: $Line"
+    Write-Log "Whisper diagnostic received. Characters=$($Line.Length)"
     if ($Line -match "(?i)\b(error|failed|cannot|no capture|could not|exception)\b") {
         $statusLabel.Text = "Whisper diagnostic"
         & $appendTranscript ("[whisper] " + $Line.Trim())
@@ -1239,13 +1221,13 @@ $startButton.Add_Click({
 
     $cliPath = Resolve-AppPath (Get-ConfigValue -Config $script:Config -Name "WhisperCliPath" -Default "")
     if (-not (Test-Path -LiteralPath $cliPath)) {
-        Offer-BackendSetup "Cannot find whisper-cli.exe.`r`n`r`nVoiceTyper looked in the configured path, PATH, and this project folder."
+        Offer-BackendSetup "Cannot find whisper-cli.exe at the configured verified path."
         return
     }
 
     $modelPath = Resolve-AppPath $script:Config.ModelPath
     if (-not (Test-Path -LiteralPath $modelPath)) {
-        Offer-BackendSetup "Cannot find the Whisper model.`r`n`r`nVoiceTyper looked in the configured path and .\models."
+        Offer-BackendSetup "Cannot find the Whisper model at the configured verified path."
         return
     }
 
@@ -1323,6 +1305,9 @@ $whisperPollTimer.Add_Tick({
     catch {
         Write-Log "whisperPollTimer failed: $($_.Exception.Message)"
         $statusLabel.Text = "Poll error"
+        if ($null -eq $script:TranscribeProcess -or $script:TranscribeProcess.HasExited) {
+            Remove-PrivateArtifacts
+        }
     }
 })
 $whisperPollTimer.Start()
@@ -1381,6 +1366,7 @@ $form.Add_FormClosing({
     $targetWatchTimer.Stop()
     $targetWatchTimer.Dispose()
     Stop-Whisper
+    Remove-PrivateArtifacts
 })
 
 [void]$form.ShowDialog()

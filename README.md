@@ -23,7 +23,7 @@ The window is intentionally small, about 300 by 300 pixels, so it can sit beside
 - Fast clipboard paste mode, with key-by-key typing fallback.
 - Feedback sounds when recording starts and stops.
 - Configurable model path, hotkey, output method, sounds, and target behavior.
-- Logs and recordings saved locally for debugging.
+- Transcript text stays in memory; WAV and per-run transcript logs are deleted after use by default.
 
 ## Files
 
@@ -36,40 +36,46 @@ The window is intentionally small, about 300 by 300 pixels, so it can sit beside
 Generated folders:
 
 - `models` - Whisper GGML model files.
-- `vendor` - local `whisper.cpp`, SDL2, and build outputs.
-- `recordings` - saved push-to-talk WAV recordings.
-- `logs` - app and transcription logs.
+- `vendor` - the pinned, SHA-256-verified `whisper.cpp` Windows release.
+- `recordings` - transient push-to-talk WAV recordings.
+- `logs` - bounded metadata/error logging and transient transcription files.
 
 ## Requirements
 
 - Windows.
-- Windows PowerShell 5.1 or PowerShell 7.
+- PowerShell 7.
 - A working microphone allowed by Windows privacy settings.
 - `whisper-cli.exe` from `whisper.cpp`.
 - A local GGML Whisper model, for example `ggml-base.en.bin`.
 
-The setup helper can download the model and build `whisper.cpp` locally if the required binaries are missing.
+The setup helper downloads only the reviewed `whisper.cpp` release and model revisions embedded in the script. Every downloaded file must match its pinned SHA-256 digest before extraction or use.
 
 ## Setup
 
 Run the setup helper:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Install-VoiceTyperBackend.ps1
+pwsh -NoProfile -File .\Install-VoiceTyperBackend.ps1
 ```
 
 The helper:
 
-- downloads `ggml-base.en.bin` if needed;
-- looks for existing `whisper-stream.exe` and `whisper-cli.exe`;
-- downloads SDL2 development files;
-- clones/builds `whisper.cpp` when a suitable prebuilt binary is not available;
-- writes discovered paths into `VoiceTyper.config.json`.
+- downloads the exact reviewed `whisper.cpp` Windows release;
+- verifies the release SHA-256 before extracting it;
+- downloads `ggml-base.en.bin` from an immutable model revision;
+- verifies the model SHA-256 before use;
+- writes only the verified paths into `VoiceTyper.config.json`.
+
+Validate the pinned-source and privacy contract without downloading anything:
+
+```powershell
+pwsh -NoProfile -File .\tests\security-contract.ps1
+```
 
 ## Run
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\VoiceTyper.ps1
+pwsh -NoProfile -File .\VoiceTyper.ps1
 ```
 
 ## Basic Workflow
@@ -106,18 +112,19 @@ Important config values in `VoiceTyper.config.json`:
 - `TargetMode`: `ActiveWindow`, `Codex`, or `Locked`.
 - `PreferredTargetTitle`: default `Codex`.
 - `RefocusTargetBeforeTyping`: whether to force focus back to the target before output.
+- `PreserveDebugArtifacts`: keep WAV and per-run stdout/stderr files after transcription; default `false`.
 
 Legacy streaming settings such as `WhisperStreamPath`, `StepMs`, `LengthMs`, `KeepMs`, `MaxTokens`, and `AudioContext` are still present because earlier versions used `whisper-stream.exe`. The current default flow uses push-to-talk recording plus `whisper-cli.exe`.
 
 ## Diagnostics
 
-VoiceTyper writes logs under `.\logs`:
+VoiceTyper writes a bounded metadata/error log under `.\logs` without transcript text. By default, it removes each recording and the corresponding Whisper stdout/stderr files after transcription.
 
 - `VoiceTyper.log` - app lifecycle, target selection, recording, transcription, output, and exceptions.
-- `transcribe-*.stdout.log` - `whisper-cli.exe` transcript output.
-- `transcribe-*.stderr.log` - Whisper model loading and diagnostic output.
+- `transcribe-*.stdout.log` - transient `whisper-cli.exe` output.
+- `transcribe-*.stderr.log` - transient Whisper diagnostics.
 
-Recordings are saved under `.\recordings`.
+Set `PreserveDebugArtifacts` to `true` only for a bounded debugging session. Existing artifacts from older versions are not deleted automatically; remove `.\recordings\*` and `.\logs\transcribe-*` after reviewing them.
 
 ## Known Limits
 

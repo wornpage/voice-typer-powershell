@@ -16,7 +16,7 @@ The primary target workflow is voice input into apps that do not have built-in d
 - Make insertion fast by default through clipboard paste.
 - Keep key-by-key typing available as a compatibility fallback.
 - Provide visible and audible state feedback.
-- Preserve logs and recordings for debugging.
+- Delete transcript-bearing logs and recordings after use unless a person explicitly enables bounded debug retention.
 
 ## Non-Goals
 
@@ -53,11 +53,11 @@ Setup helper.
 Responsibilities:
 
 - create `models` and `vendor` folders;
-- download a GGML Whisper model;
-- find existing `whisper-stream.exe` and `whisper-cli.exe`;
-- download SDL2 development files;
-- clone/build `whisper.cpp` when needed;
-- write backend paths to `VoiceTyper.config.json`.
+- download one reviewed `whisper.cpp` Windows release by immutable tag;
+- verify its pinned SHA-256 before extraction;
+- download `ggml-base.en.bin` from an immutable model revision;
+- verify the model's pinned SHA-256 before use;
+- write only verified backend paths to `VoiceTyper.config.json`.
 
 ### `VoiceTyper.config.json`
 
@@ -91,7 +91,8 @@ Responsibilities:
 11. App reads final transcript output from `logs\transcribe-*.stdout.log`.
 12. App cleans transcript text.
 13. App inserts the final text into the target app.
-14. App returns to ready state.
+14. App deletes the WAV and per-run stdout/stderr files unless debug retention was explicitly enabled.
+15. App returns to ready state.
 
 ### Optional Locked Target Flow
 
@@ -266,8 +267,8 @@ Implementation uses `.NET` `System.Media.SystemSounds`.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `WhisperCliPath` | local build path | Path to `whisper-cli.exe`. |
-| `WhisperStreamPath` | legacy local build path | Path to `whisper-stream.exe`; retained for older experiments. |
+| `WhisperCliPath` | `.\vendor\whisper-b4938\Release\whisper-cli.exe` | Path to the verified CLI. |
+| `WhisperStreamPath` | `.\vendor\whisper-b4938\Release\whisper-stream.exe` | Path to the verified stream binary retained for the streaming UI. |
 | `ModelPath` | `.\models\ggml-base.en.bin` | GGML Whisper model path. |
 | `Language` | `en` | Spoken language passed to Whisper. |
 | `Threads` | `8` | CPU thread count for transcription. |
@@ -282,6 +283,7 @@ Implementation uses `.NET` `System.Media.SystemSounds`.
 | `PreferredTargetTitle` | `Codex` | Fallback target title pattern. |
 | `RefocusTargetBeforeTyping` | `false` | Force focus before output when needed. |
 | `StartDelaySeconds` | `2` | Delay used by manual target lock. |
+| `PreserveDebugArtifacts` | `false` | Retain transcript-bearing WAV/stdout/stderr files only for a bounded debugging session. |
 
 Legacy streaming keys retained in config:
 
@@ -312,21 +314,24 @@ Recordings:
 recordings\voice-*.wav
 ```
 
+The per-run files are transient by default. `PreserveDebugArtifacts=true` retains them only for an explicit debugging session. `VoiceTyper.log` records bounded lifecycle/error metadata and never transcript text.
+
 Useful debugging checks:
 
 ```powershell
-.\vendor\whisper.cpp-build\bin\Release\whisper-cli.exe --help
+.\vendor\whisper-b4938\Release\whisper-cli.exe --help
 Get-Content .\logs\VoiceTyper.log -Tail 80
 Get-ChildItem .\recordings
 ```
 
 ## Security And Privacy
 
-- Audio recordings stay on the local machine.
+- Audio recordings stay on the local machine and are removed after transcription by default.
 - Transcription uses a local model.
 - No OpenAI API key is required.
 - No cloud API call is made by the main app.
-- The setup helper downloads dependencies/model files from public sources.
+- The setup helper accepts only pinned public-source revisions whose SHA-256 digests match the reviewed manifest in the script.
+- Application logs do not contain transcript or dictated text.
 - Clipboard paste mode temporarily modifies the clipboard, then attempts to restore it.
 
 ## Known Limitations
@@ -347,5 +352,4 @@ Get-ChildItem .\recordings
 - Model selector and benchmark view.
 - Tray mode.
 - Better clipboard preservation for non-text formats.
-- Optional cleanup of old recordings/logs.
 - Revisit streaming mode if a more reliable local backend is used.
