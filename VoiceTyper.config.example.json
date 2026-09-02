@@ -1,6 +1,6 @@
 {
-  "WhisperStreamPath": ".\\vendor\\whisper.cpp\\build\\bin\\Release\\whisper-stream.exe",
-  "WhisperCliPath": ".\\vendor\\whisper.cpp-build\\bin\\Release\\whisper-cli.exe",
+  "WhisperStreamPath": ".\\vendor\\whisper-b4938\\Release\\whisper-stream.exe",
+  "WhisperCliPath": ".\\vendor\\whisper-b4938\\Release\\whisper-cli.exe",
   "ModelPath": ".\\models\\ggml-base.en.bin",
   "Language": "en",
   "Threads": 8,
@@ -24,5 +24,6 @@
   "OutputMethod": "Paste",
   "EnableFeedbackSounds": true,
   "RecordStartSound": "Asterisk",
-  "RecordStopSound": "Exclamation"
+  "RecordStopSound": "Exclamation",
+  "PreserveDebugArtifacts": false
 }
